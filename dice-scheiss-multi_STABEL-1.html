@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dice-Scheiss 2</title>
+<script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f4f0; color: #1a1a1a; min-height: 100vh; }
+  .game-wrap { max-width: 820px; margin: 0 auto; padding-bottom: 3rem; }
+  .header { text-align: center; padding: 1.5rem 1rem 0.5rem; }
+  .tabs { display: flex; border-bottom: 1px solid #ddd; margin: 0.5rem 1rem 0; }
+  .tab { padding: 10px 24px; cursor: pointer; font-size: 14px; color: #888; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.active { color: #1a1a1a; border-bottom: 2px solid #1a1a1a; font-weight: 500; }
+  .panel { display: none; padding: 1rem; }
+  .panel.active { display: block; }
+
+  /* LOBBY */
+  .lobby-wrap { max-width: 440px; margin: 2rem auto; text-align: center; }
+  .lobby-wrap h3 { font-size: 18px; font-weight: 500; margin-bottom: 1.2rem; }
+  .lobby-input { width: 100%; border: 1px solid #ccc; border-radius: 8px; padding: 9px 12px; font-size: 15px; background: #f5f4f0; color: #1a1a1a; margin-bottom: 10px; }
+  .lobby-btn { padding: 10px 28px; border-radius: 8px; border: 1px solid #ccc; background: #eeecea; cursor: pointer; font-size: 15px; color: #1a1a1a; width: 100%; margin-bottom: 8px; }
+  .lobby-btn:hover { background: #e0dedd; }
+  .lobby-btn.primary { background: #185FA5; color: #fff; border-color: #185FA5; }
+  .lobby-btn.primary:hover { background: #0f4a85; }
+  .lobby-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: #aaa; font-size: 13px; }
+  .lobby-divider::before,.lobby-divider::after { content:''; flex:1; height:1px; background:#ddd; }
+  .room-code-display { font-size: 36px; font-weight: 700; letter-spacing: 8px; color: #185FA5; background: #eaf3ff; border-radius: 12px; padding: 18px; margin: 16px 0; font-variant-numeric: tabular-nums; }
+  .lobby-status { font-size: 14px; color: #888; margin-top: 8px; min-height: 22px; }
+  .lobby-status.ok { color: #3B6D11; }
+  .lobby-status.err { color: #E24B4A; }
+  .waiting-dots::after { content: ''; animation: dots 1.4s infinite; }
+  @keyframes dots { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} 100%{content:'.'} }
+  .conn-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #888; margin-top: 6px; }
+  .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #ccc; }
+  .conn-dot.connected { background: #3B6D11; }
+
+  /* GAME */
+  .arena { text-align: center; min-height: 140px; padding: 1rem; background: #eeecea; border-radius: 12px; margin-bottom: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+  .arena-label { font-size: 13px; color: #666; }
+  .players { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .player-col { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; transition: all 0.3s; position: relative; overflow: visible; }
+  .player-col.active-turn { border: 2px solid #185FA5; background: #eaf3ff; }
+  .player-col.active-turn .player-name { color: #0c3d6e; }
+  .player-col.me-col { border-color: #3B6D11; }
+  .player-col.me-col.active-turn { border-color: #185FA5; }
+  .player-name { font-size: 16px; font-weight: 500; margin-bottom: 2px; }
+  .player-score-total { font-size: 24px; font-weight: 500; margin: 2px 0 6px; }
+  .me-tag { font-size: 10px; background: #3B6D11; color: #fff; border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; }
+  .round-history { margin-top: 6px; }
+  .round-row { display: flex; align-items: center; gap: 3px; font-size: 11px; color: #888; margin: 3px 0; flex-wrap: nowrap; }
+  .round-row.faded { opacity: 0.35; }
+  .round-row .rd-label { min-width: 42px; font-size: 10px; flex-shrink: 0; }
+
+  .powers { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .power-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 50px; height: 50px; border-radius: 10px; border: 1.5px solid #ddd; background: #fff; cursor: pointer; font-size: 20px; transition: all 0.2s; user-select: none; }
+  .power-btn:hover:not(.used-power) { transform: scale(1.1); }
+  .power-btn:active:not(.used-power) { transform: scale(0.94); }
+  .power-btn.used-power { opacity: 0.45; cursor: default; filter: grayscale(1); position: relative; overflow: hidden; }
+  .power-btn.used-power::after { content:''; position:absolute; top:0; left:0; width:100%; height:100%; background: linear-gradient(to bottom right, transparent calc(50% - 1.5px), #555 calc(50% - 1.5px), #555 calc(50% + 1.5px), transparent calc(50% + 1.5px)); pointer-events:none; }
+  .power-btn .plabel { font-size: 8px; color: #888; margin-top: 1px; line-height: 1.1; text-align: center; }
+  .power-btn.golden { border-color: #d4a000; background: #fffbe6; }
+  .power-btn.goggles { border-color: #c06090; background: #fff0f8; }
+  .power-btn.jinx { border-color: #6644cc; background: #f5f0ff; }
+  .power-btn.scramble { border-color: #cc4400; background: #fff4ee; }
+
+  .die { display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 12px; font-size: 26px; cursor: pointer; user-select: none; transition: transform 0.1s; font-weight: 500; }
+  .die:hover { transform: scale(1.08); }
+  .die:active { transform: scale(0.95); }
+  .die.rolling { animation: roll 0.4s ease-out; }
+  .die.drumrolling { animation: drumroll 0.13s ease-in-out infinite; }
+  .die.big { width: 82px; height: 82px; font-size: 38px; border-radius: 16px; }
+  .die.small { width: 26px; height: 26px; font-size: 11px; border-radius: 4px; }
+  .die-red { background: #E24B4A; color: white; box-shadow: 0 2px 8px rgba(226,75,74,0.35); }
+  .die-blue { background: #185FA5; color: white; box-shadow: 0 2px 8px rgba(24,95,165,0.3); }
+  .die-green { background: #3B6D11; color: white; box-shadow: 0 2px 8px rgba(59,109,17,0.3); }
+  .die-blue.used { opacity: 0.3; cursor: default; }
+  .die-blue.selectable { box-shadow: 0 0 0 3px #378ADD, 0 2px 8px rgba(24,95,165,0.3); cursor: pointer; }
+  .die.unrolled { font-size: 22px; }
+  .die.big.unrolled { font-size: 28px; }
+  .die.peeked { box-shadow: 0 0 0 3px #ff69b4, 0 0 14px rgba(255,105,180,0.5) !important; cursor: pointer; }
+  .die.no-click { cursor: default !important; pointer-events: none; }
+
+  @keyframes roll { 0%{transform:rotate(0deg) scale(1)} 20%{transform:rotate(-18deg) scale(1.12)} 45%{transform:rotate(12deg) scale(0.93)} 70%{transform:rotate(-7deg) scale(1.06)} 100%{transform:rotate(0deg) scale(1)} }
+  @keyframes drumroll { 0%{transform:rotate(-9deg) scale(1.06)} 50%{transform:rotate(9deg) scale(0.96)} 100%{transform:rotate(-9deg) scale(1.06)} }
+
+  .blue-dice-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 999; background: rgba(0,0,0,0.28); }
+  .overlay-text { font-size: 24px; font-weight: 500; text-align: center; padding: 28px 36px; border-radius: 16px; background: #fff; border: 1px solid #ddd; color: #1a1a1a; animation: popIn 0.4s ease-out; max-width: 86%; line-height: 1.45; }
+  .overlay-text.fire { background: #E24B4A; color: white; border-color: #993C1D; }
+  .overlay-text.jinx-skin { background: #6644cc; color: white; border-color: #3322aa; }
+  .overlay-text.scramble-skin { background: #cc4400; color: white; border-color: #993300; }
+  @keyframes popIn { 0%{transform:scale(0.4);opacity:0} 65%{transform:scale(1.1)} 100%{transform:scale(1);opacity:1} }
+
+  .status-msg { font-size: 13px; color: #888; margin-top: 4px; min-height: 20px; }
+  .round-banner { font-size: 15px; font-weight: 500; text-align: center; padding: 6px; }
+  .score-count { display: inline-block; }
+  @keyframes scoreBump { 0%{transform:scale(1)} 50%{transform:scale(1.3)} 100%{transform:scale(1)} }
+  .score-count.bump { animation: scoreBump 0.12s ease-out; }
+  .drumroll-label { color: #E24B4A; font-weight: 500; animation: dpulse 0.45s ease-in-out infinite alternate; }
+  @keyframes dpulse { 0%{opacity:0.5} 100%{opacity:1} }
+
+  .play-again-btn { display: block; margin: 2rem auto 0; padding: 12px 36px; border-radius: 8px; border: 2px solid #E24B4A; background: #fff5f5; color: #A32D2D; cursor: pointer; font-size: 16px; font-weight: 500; }
+
+  /* TIMER */
+  .timer-box { display:flex;flex-direction:column;align-items:center;gap:5px;background:#fff;border:1px solid #ccc;border-radius:10px;padding:8px 18px; }
+  .timer-label { font-size:12px;font-weight:500;color:#555; }
+  .timer-track { width:120px;height:7px;background:#e0e0e0;border-radius:4px;overflow:hidden; }
+  .timer-fill { height:100%;width:100%;border-radius:4px;background:#185FA5;transition:width 0.08s linear,background 0.4s; }
+  .timer-num { font-size:22px;font-weight:500;color:#185FA5;min-width:28px;text-align:center;transition:color 0.4s; }
+
+  .power-btn.glowing { animation: goldenGlow 0.55s ease-in-out infinite alternate; cursor:pointer!important;opacity:1!important;filter:none!important; }
+  .power-btn.jinx.glowing { animation: jinxGlow 0.55s ease-in-out infinite alternate; }
+  .power-btn.scramble.glowing { animation: scrambleGlow 0.55s ease-in-out infinite alternate; }
+  @keyframes goldenGlow { 0%{transform:scale(1);box-shadow:0 0 0 0 rgba(212,160,0,0.5)} 100%{transform:scale(1.13);box-shadow:0 0 10px 5px rgba(212,160,0,0.45)} }
+  @keyframes jinxGlow { 0%{transform:scale(1);box-shadow:0 0 0 0 rgba(102,68,204,0.5)} 100%{transform:scale(1.13);box-shadow:0 0 10px 5px rgba(102,68,204,0.45)} }
+  @keyframes scrambleGlow { 0%{transform:scale(1);box-shadow:0 0 0 0 rgba(204,68,0,0.5)} 100%{transform:scale(1.13);box-shadow:0 0 10px 5px rgba(204,68,0,0.45)} }
+
+  /* Leaderboard */
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .lb-table th { text-align: left; padding: 8px 12px; font-weight: 500; border-bottom: 1px solid #ddd; font-size: 12px; color: #888; }
+  .lb-table td { padding: 8px 12px; border-bottom: 1px solid #eee; }
+  .lb-empty { text-align: center; padding: 2rem; color: #888; font-size: 14px; }
+  .lb-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .clear-btn { font-size: 12px; color: #888; border: 1px solid #ddd; background: none; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .clear-btn:hover { color: #A32D2D; border-color: #E24B4A; }
+
+  /* Rules */
+  .rules-content { max-width: 520px; font-size: 14px; line-height: 1.7; color: #555; }
+  .rules-content h3 { font-size: 16px; font-weight: 500; color: #1a1a1a; margin: 1rem 0 0.4rem; }
+  .rules-dice-row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+
+  /* Disconnect banner */
+  .disconnect-banner { background: #E24B4A; color: #fff; text-align: center; padding: 10px; font-size: 14px; border-radius: 8px; margin-bottom: 10px; display: none; }
+
+  @media (max-width: 600px) {
+    .players { grid-template-columns: 1fr; }
+    .die.big { width: 70px; height: 70px; font-size: 32px; }
+    .power-btn { width: 44px; height: 44px; font-size: 18px; }
+    .room-code-display { font-size: 28px; letter-spacing: 5px; }
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a1a; color: #f0efeb; }
+    .player-col { background: #242424; border-color: #333; }
+    .player-col.active-turn { background: #0c1e30; border-color: #185FA5; }
+    .player-col.active-turn .player-name { color: #85b7eb; }
+    .arena { background: #242424; }
+    .tab.active { color: #f0efeb; border-bottom-color: #f0efeb; }
+    .tab { color: #888; } .tabs { border-color: #333; }
+    .lobby-input { background: #2a2a2a; color: #f0efeb; border-color: #444; }
+    .lobby-btn { background: #2a2a2a; color: #f0efeb; border-color: #444; }
+    .lobby-btn:hover { background: #333; }
+    .overlay-text { background: #242424; color: #f0efeb; border-color: #444; }
+    .overlay-text.fire { background: #E24B4A; color: white; }
+    .overlay-text.jinx-skin { background: #6644cc; color: white; }
+    .overlay-text.scramble-skin { background: #cc4400; color: white; }
+    .play-again-btn { background: #3a1010; }
+    .lb-table th { border-color: #333; color: #888; } .lb-table td { border-color: #2a2a2a; }
+    .clear-btn { border-color: #333; color: #888; }
+    .rules-content { color: #aaa; } .rules-content h3 { color: #f0efeb; }
+    .power-btn { background: #2a2a2a; border-color: #444; }
+    .power-btn.golden { background: #2a2500; border-color: #d4a000; }
+    .power-btn.goggles { background: #2a1020; border-color: #c06090; }
+    .power-btn.jinx { background: #1a1030; border-color: #6644cc; }
+    .power-btn.scramble { background: #2a1000; border-color: #cc4400; }
+    .room-code-display { background: #0c1e30; }
+    .timer-box { background: #242424; border-color: #444; }
+    .player-col.me-col { border-color: #3B6D11; }
+  }
+</style>
+</head>
+<body>
+<div class="game-wrap">
+  <div class="header">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;">
+      <span style="font-size:28px;color:#E24B4A;">&#9856;</span>
+      <span style="font-size:28px;font-weight:500;letter-spacing:1px;">Dice-Scheiss 2</span>
+      <span style="font-size:28px;color:#185FA5;">&#9861;</span>
+    </div>
+    <div style="font-size:12px;color:#888;margin-top:2px;">Multiplayer</div>
+  </div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('play',this)">Play</div>
+    <div class="tab" onclick="switchTab('rules',this)">Rules</div>
+    <div class="tab" onclick="switchTab('leaderboard',this)">Leaderboard</div>
+  </div>
+
+  <!-- PLAY TAB -->
+  <div id="tab-play" class="panel active">
+
+    <!-- LOBBY -->
+    <div id="lobby-screen">
+      <div class="lobby-wrap">
+        <h3>Dice-Scheiss 2</h3>
+        <input class="lobby-input" id="my-name-input" placeholder="Your name" maxlength="16"/>
+
+        <button class="lobby-btn primary" onclick="createRoom()">Create a room</button>
+
+        <div class="lobby-divider">or join one</div>
+
+        <input class="lobby-input" id="join-code-input" placeholder="Room code" maxlength="6" style="text-transform:uppercase;letter-spacing:3px;text-align:center;font-size:18px;font-weight:600;"/>
+        <button class="lobby-btn" onclick="joinRoom()">Join room</button>
+
+        <div class="lobby-status" id="lobby-status"></div>
+        <div class="conn-badge"><div class="conn-dot" id="conn-dot"></div><span id="conn-label">Connecting to Ably…</span></div>
+      </div>
+
+      <!-- Waiting for opponent -->
+      <div id="waiting-screen" style="display:none;" class="lobby-wrap">
+        <div class="room-code-display" id="room-code-display">------</div>
+        <div style="font-size:13px;color:#888;margin-bottom:8px;">Share this code with your opponent</div>
+        <button class="lobby-btn" onclick="copyRoomCode()" id="copy-btn">Copy code</button>
+        <div class="lobby-status waiting-dots" id="waiting-status">Waiting for opponent</div>
+        <button class="lobby-btn" style="margin-top:16px;font-size:13px;color:#888;" onclick="cancelRoom()">Cancel</button>
+      </div>
+    </div>
+
+    <!-- GAME -->
+    <div id="game-screen" style="display:none;">
+      <div class="disconnect-banner" id="disconnect-banner">⚠️ Opponent disconnected</div>
+      <div class="round-banner" id="round-banner"></div>
+      <div class="arena">
+        <div class="arena-label" id="arena-label">Waiting…</div>
+        <div id="arena-dice"></div>
+        <div id="timer-slot"></div>
+        <div class="status-msg" id="status-msg"></div>
+      </div>
+      <div class="players">
+        <div class="player-col" id="col-0">
+          <div class="player-name" id="name-0">Player 1</div>
+          <div style="font-size:12px;color:#888;">Total score</div>
+          <div class="player-score-total"><span class="score-count" id="total-0">0</span></div>
+          <div class="powers">
+            <div class="power-btn golden" id="pw-golden-0" onclick="localAction('golden',0)" title="Golden Reroll"><span>🎲</span><span class="plabel" style="color:#b08000;">reroll</span></div>
+            <div class="power-btn goggles" id="pw-goggles-0" onclick="localAction('goggles',0)" title="Future Goggles"><span>🥽</span><span class="plabel" style="color:#c06090;">peek</span></div>
+            <div class="power-btn jinx" id="pw-jinx-0" onclick="localAction('jinx',0)" title="The Jinx"><span>🧿</span><span class="plabel" style="color:#6644cc;">jinx</span></div>
+            <div class="power-btn scramble" id="pw-scramble-0" onclick="localAction('scramble',0)" title="The Scramble"><span>🌀</span><span class="plabel" style="color:#cc4400;">scramble</span></div>
+          </div>
+          <div class="round-history" id="history-0"></div>
+        </div>
+        <div class="player-col" id="col-1">
+          <div class="player-name" id="name-1">Player 2</div>
+          <div style="font-size:12px;color:#888;">Total score</div>
+          <div class="player-score-total"><span class="score-count" id="total-1">0</span></div>
+          <div class="powers">
+            <div class="power-btn golden" id="pw-golden-1" onclick="localAction('golden',1)" title="Golden Reroll"><span>🎲</span><span class="plabel" style="color:#b08000;">reroll</span></div>
+            <div class="power-btn goggles" id="pw-goggles-1" onclick="localAction('goggles',1)" title="Future Goggles"><span>🥽</span><span class="plabel" style="color:#c06090;">peek</span></div>
+            <div class="power-btn jinx" id="pw-jinx-1" onclick="localAction('jinx',1)" title="The Jinx"><span>🧿</span><span class="plabel" style="color:#6644cc;">jinx</span></div>
+            <div class="power-btn scramble" id="pw-scramble-1" onclick="localAction('scramble',1)" title="The Scramble"><span>🌀</span><span class="plabel" style="color:#cc4400;">scramble</span></div>
+          </div>
+          <div class="round-history" id="history-1"></div>
+        </div>
+      </div>
+      <button class="play-again-btn" id="play-again-btn" style="display:none;" onclick="playAgain()">Play Again</button>
+    </div>
+  </div>
+
+  <!-- RULES TAB -->
+  <div id="tab-rules" class="panel">
+    <div class="rules-content">
+      <h3>What you need</h3>
+      <p>Two players in different places. Each gets a link to the same game via a room code.</p>
+      <h3>Starting the game</h3>
+      <p>Both players roll the <span style="color:#3B6D11;font-weight:500;">green dice</span>. Whoever scores higher goes first. Ties are rerolled.</p>
+      <h3>Each round</h3>
+      <p>The active player clicks the <span style="color:#E24B4A;font-weight:500;">red master dice</span>. That number decides how many blue dice they may roll. Then pick which blue dice to roll — their total is the round score.</p>
+      <h3>Power-ups — once per game each</h3>
+      <p style="margin-top:5px;"><strong>🎲 Golden Reroll</strong> — Activate on your own turn after rolling the master dice (red). Discard the result and roll a fresh one — you must accept the new value.</p>
+      <p style="margin-top:5px;"><strong>🥽 Future Goggles</strong> — Peek at one unrolled blue dice to see its value before deciding whether to pick it.</p>
+      <p style="margin-top:5px;"><strong>🧿 The Jinx</strong> — Activate on your opponent's turn after they roll the master dice. Forces them to roll it again and accept the new result.</p>
+      <p style="margin-top:5px;"><strong>🌀 The Scramble</strong> — Activate on your opponent's turn after they've rolled blue dice. All their rolled dice get new random values.</p>
+      <h3>Winning</h3>
+      <p>After 3 rounds, whoever has the highest total score wins!</p>
+      <div class="rules-dice-row" style="margin-top:1rem;">
+        <div class="die die-red small">&#9856;</div><span style="font-size:13px;">Master dice — decides how many blue dice you roll</span>
+      </div>
+      <div class="rules-dice-row">
+        <div class="die die-blue small">&#9861;</div><span style="font-size:13px;">Blue dice — click to roll, scores are totalled</span>
+      </div>
+      <div class="rules-dice-row">
+        <div class="die die-green small">&#9856;</div><span style="font-size:13px;">Green dice — decides who goes first</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD TAB -->
+  <div id="tab-leaderboard" class="panel">
+    <div class="lb-header">
+      <span style="font-size:14px;font-weight:500;">All-time results</span>
+      <button class="clear-btn" onclick="clearLeaderboard()">Clear all</button>
+    </div>
+    <div id="lb-content"></div>
+  </div>
+</div>
+
+<div id="overlay" style="display:none;" class="overlay">
+  <div class="overlay-text" id="overlay-text"></div>
+</div>
+
+
+<script>
+// ── CONFIG ─────────────────────────────────────────────────────
+const ABLY_KEY = 'uCsQmw.5j3MEQ:jMAc-nA_ZYCgnpMOo5l3ftpJwpX9CRu6kjPOIuRKvp4';
+const TOTAL_ROUNDS = 3;
+const STORAGE_KEY = 'dicescheiss2-leaderboard';
+const FACES = ['&#9856;','&#9857;','&#9858;','&#9859;','&#9860;','&#9861;'];
+
+const ROUND_TAUNTS = [
+  w=>`${w} dominates Round 1!`,
+  w=>`${w} is the Dice Queen of Round 2!`,
+  w=>`Round 3 bows down to ${w}!`,
+  w=>`${w} obliterates Round 4!`,
+];
+const TRASH_HIGH = ["lucky roll 👀","oof, that's scary 😬","call the dice police 🚨","absolutely unhinged 🎲"];
+const TRASH_LOW = ["lol 😂","even my grandma rolls higher","yikes…","is that it? 😴"];
+const INSULTS = [
+  (w,l,d)=>`${l} lost by ${d} points. Honestly ${l}, that's just tragic.`,
+  (w,l,d)=>`${w} wins. ${l} tried their best. Unfortunately their best is ${d} points worse than ${w}'s worst.`,
+  (w,l,d)=>`${d} points behind. ${l} should perhaps consider a different hobby.`,
+  (w,l,d)=>`The gap was ${d} points. That's not a loss, ${l}. That's an event.`,
+  (w,l,d)=>`${l} scored ${d} fewer points than ${w}. In dice. The game of pure luck. Impressive failure, ${l}.`,
+];
+
+// ── STATE ──────────────────────────────────────────────────────
+let ably = null;
+let roomChannel = null;
+let myPlayerIdx = null; // 0 or 1
+let isHost = false;
+let myRoomCode = null;
+let state = {};
+let leaderboard = [];
+let audioCtx = null;
+
+// ── ABLY SETUP ─────────────────────────────────────────────────
+function initAbly() {
+  ably = new Ably.Realtime({ key: ABLY_KEY, closeOnUnload: true, clientId: 'player-' + Math.random().toString(36).slice(2, 10) });
+  ably.connection.on('connected', () => {
+    document.getElementById('conn-dot').classList.add('connected');
+    document.getElementById('conn-label').textContent = 'Connected';
+  });
+  ably.connection.on('disconnected', () => {
+    document.getElementById('conn-dot').classList.remove('connected');
+    document.getElementById('conn-label').textContent = 'Reconnecting…';
+  });
+}
+
+function genRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+async function createRoom() {
+  const name = document.getElementById('my-name-input').value.trim() || 'Player 1';
+  myRoomCode = genRoomCode();
+  myPlayerIdx = 0;
+  isHost = true;
+
+  setLobbyStatus('');
+  document.getElementById('lobby-screen').querySelector('.lobby-wrap').style.display = 'none';
+  document.getElementById('waiting-screen').style.display = 'block';
+  document.getElementById('room-code-display').textContent = myRoomCode;
+
+  roomChannel = ably.channels.get(`ds2:${myRoomCode}`);
+
+  roomChannel.subscribe('action', (msg) => {
+    if (isHost && !msg.data.fromHost) handleGuestAction(msg.data);
+  });
+
+  roomChannel.presence.subscribe('enter', async (member) => {
+    // Ignore our own entry (host), only react to guest joining
+    if (!member.data?.isHost) {
+      const guestName = member.data?.name || 'Player 2';
+      document.getElementById('waiting-status').textContent = `${guestName} joined! Starting…`;
+      await sleep(800);
+      startGame(name, guestName);
+    }
+  });
+
+  roomChannel.presence.subscribe('leave', () => {
+    if (document.getElementById('game-screen').style.display !== 'none') {
+      showDisconnectBanner();
+    }
+  });
+
+  await roomChannel.presence.enter({ name, isHost: true });
+}
+
+async function joinRoom() {
+  const name = document.getElementById('my-name-input').value.trim() || 'Player 2';
+  const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+  if (code.length < 4) { setLobbyStatus('Enter a valid room code', 'err'); return; }
+
+  myPlayerIdx = 1;
+  isHost = false;
+  myRoomCode = code;
+
+  setLobbyStatus('Joining room…');
+  roomChannel = ably.channels.get(`ds2:${code}`);
+
+  roomChannel.subscribe('action', (msg) => {
+    if (!isHost && msg.data.fromHost) handleHostBroadcast(msg.data);
+  });
+
+  roomChannel.presence.subscribe('leave', () => {
+    if (document.getElementById('game-screen').style.display !== 'none') {
+      showDisconnectBanner();
+    }
+  });
+
+  // Enter the room — host will see our presence 'enter' event and kick off the game
+  await roomChannel.presence.enter({ name });
+  setLobbyStatus('Joined! Waiting for host to start…', 'ok');
+}
+
+function cancelRoom() {
+  if (roomChannel) { roomChannel.presence.leave(); roomChannel.unsubscribe(); }
+  document.getElementById('waiting-screen').style.display = 'none';
+  document.getElementById('lobby-screen').querySelector('.lobby-wrap').style.display = 'block';
+}
+
+function copyRoomCode() {
+  navigator.clipboard.writeText(myRoomCode).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy code', 2000);
+  });
+}
+
+function setLobbyStatus(msg, type='') {
+  const el = document.getElementById('lobby-status');
+  el.textContent = msg;
+  el.className = 'lobby-status' + (type ? ' ' + type : '');
+}
+
+// ── HOST BROADCASTS STATE TO GUEST ────────────────────────────
+function broadcast(type, data) {
+  if (!roomChannel) return;
+  roomChannel.publish('action', { type, fromHost: isHost, ...data });
+}
+
+// Host sends full serializable state snapshot
+function broadcastState(extra = {}) {
+  broadcast('state', { gameState: serializeState(), ...extra });
+}
+
+function serializeState() {
+  return {
+    names: state.names,
+    totals: state.totals,
+    rounds: state.rounds,
+    round: state.round,
+    activePlayer: state.activePlayer,
+    firstPlayer: state.firstPlayer,
+    masterVal: state.masterVal,
+    allowed: state.allowed,
+    blueDice: state.blueDice,
+    blueRolled: state.blueRolled,
+    turnPhase: state.turnPhase,
+    peeking: state.peeking,
+    pw: state.pw,
+    phase: state.phase,
+    startRollResults: state.startRollResults,
+    startRollPlayer: state.startRollPlayer,
+    // UI hints for guest
+    ui: {
+      arenaLabel: document.getElementById('arena-label')?.textContent || '',
+      statusMsg: document.getElementById('status-msg')?.textContent || '',
+      roundBanner: document.getElementById('round-banner')?.textContent || '',
+      timerFrac: state._timerFrac ?? null,
+      timerLabel: state._timerLabel ?? null,
+      arenaMode: state._arenaMode || 'none', // 'master'|'blue'|'none'|'start'
+      suppressArena: state._suppressArena || false,
+      masterSeq: state._masterSeq || 0,
+      peekReveal: state._peekReveal || null, // {idx, val} for the guest to see peek result
+      goldenUsed: state._goldenUsed || false,
+    }
+  };
+}
+
+// Guest applies state snapshot and re-renders
+function applyState(gs) {
+  state.names = gs.names;
+  state.totals = gs.totals;
+  state.rounds = gs.rounds;
+  state.round = gs.round;
+  state.activePlayer = gs.activePlayer;
+  state.firstPlayer = gs.firstPlayer;
+  state.masterVal = gs.masterVal;
+  state.allowed = gs.allowed;
+  state.blueDice = gs.blueDice;
+  state.blueRolled = gs.blueRolled;
+  state.turnPhase = gs.turnPhase;
+  state.peeking = gs.peeking;
+  state.pw = gs.pw;
+  state.phase = gs.phase;
+  state.startRollResults = gs.startRollResults;
+  state.startRollPlayer = gs.startRollPlayer;
+
+  // Apply UI labels
+  const ui = gs.ui;
+  state._goldenUsed = ui.goldenUsed || false;
+  document.getElementById('arena-label').textContent = ui.arenaLabel;
+  document.getElementById('status-msg').textContent = ui.statusMsg;
+  document.getElementById('round-banner').textContent = ui.roundBanner;
+
+  // Scores
+  document.getElementById('total-0').textContent = state.totals[0];
+  document.getElementById('total-1').textContent = state.totals[1];
+  // Set names but preserve the "you" me-tag span
+  for (let p = 0; p < 2; p++) {
+    const nameEl = document.getElementById(`name-${p}`);
+    if (nameEl) {
+      const tag = nameEl.querySelector('.me-tag');
+      nameEl.textContent = state.names[p];
+      if (tag) nameEl.appendChild(tag);
+    }
+  }
+
+  // Active turn highlight
+  document.getElementById('col-0').classList.toggle('active-turn', state.activePlayer === 0);
+  document.getElementById('col-1').classList.toggle('active-turn', state.activePlayer === 1);
+
+  // Timer
+  if (ui.timerFrac !== null) {
+    showTimerGuest(ui.timerLabel, ui.timerFrac);
+  } else {
+    hideTimer();
+  }
+
+  // Power buttons
+  refreshPowers();
+
+  // Arena dice rendering
+  renderArenaForGuest(ui);
+
+  // Round history
+  updateRoundHistory(0);
+  updateRoundHistory(1);
+}
+
+let _lastArenaMode = null;
+let _lastMasterSeq = 0;
+
+function renderArenaForGuest(ui) {
+  // Don't re-render arena while suppressed or overlay showing
+  if (ui.suppressArena || document.getElementById('overlay').style.display === 'flex') {
+    _lastArenaMode = ui.arenaMode;
+    _lastMasterSeq = ui.masterSeq;
+    return;
+  }
+  const a = document.getElementById('arena-dice');
+  const modeChanged = ui.arenaMode !== _lastArenaMode;
+  _lastArenaMode = ui.arenaMode;
+
+  if (ui.arenaMode === 'master') {
+    // Rebuild when mode changed OR when masterSeq changed (e.g. after jinx resets the die)
+    const seqChanged = ui.masterSeq !== _lastMasterSeq;
+    if (modeChanged || seqChanged || !document.getElementById('master-die-el')) {
+      _lastMasterSeq = ui.masterSeq;
+      const d = makeUnrolledDie('die-red');
+      d.id = 'master-die-el';
+      a.innerHTML = '';
+      a.appendChild(d);
+
+      if (state.masterVal > 0 && state.turnPhase !== 'waitMaster') {
+        // Already rolled — show value, no click
+        d.innerHTML = faceHTML(state.masterVal);
+        d.classList.remove('unrolled');
+        d.classList.add('no-click');
+      } else if (state.turnPhase === 'waitMaster' && isMyTurn()) {
+        d.classList.remove('no-click');
+        const actionType = state._goldenUsed ? 'masterRollReroll' : 'masterRoll';
+        d.onclick = () => { d.onclick = null; sendAction(actionType); };
+      } else {
+        d.classList.add('no-click');
+      }
+    }
+  } else if (ui.arenaMode === 'blue') {
+    // Always rebuild blue dice row so we start fresh each turn
+    if (!document.querySelector('.blue-dice-row')) {
+      const row = document.createElement('div');
+      row.className = 'blue-dice-row';
+      for (let i = 0; i < 6; i++) {
+        const d = makeUnrolledDie('die-blue', false);
+        d.style.cssText = 'width:64px;height:64px;font-size:26px;border-radius:12px;';
+        d.id = `bdie-${i}`;
+        d.classList.add('no-click');
+        row.appendChild(d);
+      }
+      a.innerHTML = '';
+      a.appendChild(row);
+    }
+    // If transitioning from master -> blue, the row won't exist yet — handled above.
+    // But if arenaMode just switched, force a rebuild:
+    if (a.querySelector('.die-red') || a.querySelector('.die-green')) {
+      a.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'blue-dice-row';
+      for (let i = 0; i < 6; i++) {
+        const d = makeUnrolledDie('die-blue', false);
+        d.style.cssText = 'width:64px;height:64px;font-size:26px;border-radius:12px;';
+        d.id = `bdie-${i}`;
+        d.classList.add('no-click');
+        row.appendChild(d);
+      }
+      a.appendChild(row);
+    }
+    for (let i = 0; i < 6; i++) {
+      const bd = state.blueDice[i];
+      const el = document.getElementById(`bdie-${i}`);
+      if (!el) continue;
+      if (bd && bd.rolled) {
+        el.innerHTML = faceHTML(bd.val);
+        el.classList.remove('unrolled', 'selectable', 'peeked');
+        el.classList.add('used');
+        el.classList.add('no-click');
+        el.onclick = null;
+      } else if (bd && bd.peekVal !== undefined) {
+        // This die has been peeked — show value with pink glow
+        el.innerHTML = faceHTML(bd.peekVal);
+        el.classList.add('peeked');
+        el.classList.remove('unrolled', 'no-click');
+        if (isMyTurn() && state.turnPhase === 'rollBlue') {
+          // Click to roll the known value
+          const knownVal = bd.peekVal;
+          el.onclick = () => { el.onclick = null; sendAction('blueRoll', { idx: i, knownVal }); };
+        }
+      } else if (isMyTurn() && state.turnPhase === 'rollBlue' && bd && !bd.rolled) {
+        // Normal unrolled die
+        if (state.peeking) {
+          // Currently in peek mode — this die can be chosen to peek
+          el.classList.remove('no-click');
+          el.onclick = () => { el.onclick = null; sendAction('gogglesPick', { idx: i }); };
+        } else {
+          // Normal roll
+          el.classList.remove('no-click');
+          el.onclick = () => { el.onclick = null; sendAction('blueRoll', { idx: i }); };
+        }
+      } else {
+        el.classList.add('no-click');
+        el.onclick = null;
+      }
+    }
+  } else if (ui.arenaMode === 'start') {
+    // Rebuild when mode changed OR when startRollPlayer changed (new turn)
+    const needsRebuild = modeChanged || !document.getElementById('master-die-el')
+      || (document.getElementById('master-die-el') && !document.getElementById('master-die-el').classList.contains('die-green'));
+    if (needsRebuild) {
+      const d2 = makeUnrolledDie('die-green');
+      d2.id = 'master-die-el';
+      a.innerHTML = '';
+      a.appendChild(d2);
+    }
+    const startEl = document.getElementById('master-die-el');
+    const myResult = state.startRollResults?.[myPlayerIdx];
+    if (myResult) {
+      startEl.innerHTML = faceHTML(myResult);
+      startEl.classList.remove('unrolled');
+      startEl.classList.add('no-click');
+      startEl.onclick = null;
+    } else {
+      const isMyStartTurn = state.startRollPlayer === myPlayerIdx;
+      if (isMyStartTurn && !startEl.onclick) {
+        startEl.classList.remove('no-click');
+        startEl.onclick = () => { startEl.onclick = null; sendAction('startRoll'); };
+      } else if (!isMyStartTurn) {
+        startEl.classList.add('no-click');
+        startEl.onclick = null;
+      }
+    }
+  } else {
+    // none
+  }
+}
+
+// ── HOST/GUEST MESSAGE HANDLING ────────────────────────────────
+
+// Guest sends action to host
+function sendAction(type, data = {}) {
+  if (isHost) {
+    // Host acting on themselves — process locally
+    handleLocalHostAction(type, data);
+  } else {
+    broadcast(type, data);
+  }
+}
+
+// Host receives action from guest (player 1)
+function handleGuestAction(msg) {
+  const { type } = msg;
+  if (type === 'startRoll') {
+    if (state.phase === 'startRoll' && state.startRollPlayer === 1) {
+      resolveStartRoll(1);
+    }
+  } else if (type === 'masterRoll') {
+    if (state.activePlayer === 1 && state.turnPhase === 'waitMaster') {
+      resolveGuestMasterRoll();
+    }
+  } else if (type === 'masterRollReroll') {
+    if (state.activePlayer === 1 && state.turnPhase === 'waitMaster') {
+      resolveGuestMasterRollReroll();
+    }
+  } else if (type === 'blueRoll') {
+    if (state.activePlayer === 1 && state.turnPhase === 'rollBlue') {
+      resolveGuestBlueRoll(msg.idx);
+    }
+
+  } else if (type === 'golden') {
+    if (state.activePlayer === 1 && state.turnPhase === 'rerollTimer' && state.pw[1].golden) {
+      hostUseGolden(1);
+    }
+  } else if (type === 'goggles') {
+    if (state.activePlayer === 1 && state.turnPhase === 'rollBlue' && state.pw[1].goggles && !state.peeking) {
+      hostUseGoggles(1);
+    }
+  } else if (type === 'gogglesPick') {
+    if (state.peeking && state.activePlayer === 1) {
+      hostDoGogglesPick(1, msg.idx);
+    }
+  } else if (type === 'jinx') {
+    if (state.activePlayer === 0 && state.turnPhase === 'jinxTimer' && state.pw[1].jinx) {
+      hostUseJinx(1);
+    }
+  } else if (type === 'scramble') {
+    if (state.activePlayer === 0 && state.turnPhase === 'scrambleTimer' && state.pw[1].scramble) {
+      hostUseScramble(1);
+    }
+  }
+}
+
+// Guest receives broadcast from host and applies it
+function handleHostBroadcast(msg) {
+  const { type } = msg;
+  if (type === 'start') {
+    // Host is starting the game — guest switches to game screen
+    document.getElementById('lobby-screen').style.display = 'none';
+    document.getElementById('game-screen').style.display = 'block';
+    // Init a skeleton state so applyState has something to work with
+    state = { names: [msg.n1, msg.n2], totals: [0,0], rounds:[[],[]], round:1,
+      activePlayer:0, firstPlayer:0, masterVal:0, allowed:0, blueDice:[],
+      blueRolled:0, turnPhase:'', peeking:false, pw:null, phase:'startRoll',
+      startRollResults:[null,null], startRollPlayer:0 };
+    document.getElementById('name-0').textContent = msg.n1;
+    document.getElementById('name-1').textContent = msg.n2;
+    markMeCol();
+  } else if (type === 'state') {
+    applyState(msg.gameState);
+  } else if (type === 'animate') {
+    handleAnimateMsg(msg);
+  } else if (type === 'overlay') {
+    showOverlay(msg.text, msg.duration, msg.skin);
+  } else if (type === 'scoreAnim') {
+    animateScoreCount(msg.id, msg.from, msg.to);
+  }
+}
+
+async function handleAnimateMsg(msg) {
+  if (msg.animType === 'masterRoll') {
+    // Drumroll start — just animate the drumroll, wait for masterRollReveal for the value
+    const el = document.getElementById('master-die-el');
+    if (el) {
+      el.classList.remove('unrolled');
+      el.classList.add('drumrolling');
+      el.innerHTML = '?';
+      sndDrumroll();
+    }
+  } else if (msg.animType === 'masterRollReveal') {
+    // Actual roll value revealed — stop drumroll, animate to value
+    const el = document.getElementById('master-die-el');
+    if (el) {
+      el.classList.remove('drumrolling');
+      await new Promise(r => animateDie(el, msg.val, r));
+      sndCoin();
+    }
+  } else if (msg.animType === 'startRoll') {
+    const el = document.getElementById('master-die-el');
+    if (el) {
+      sndStart();
+      await new Promise(r => animateDie(el, msg.val, r));
+    }
+  } else if (msg.animType === 'blueRoll') {
+    const el = document.getElementById(`bdie-${msg.idx}`);
+    if (el) {
+      el.classList.remove('selectable', 'peeked', 'unrolled');
+      sndRoll();
+      await new Promise(r => animateDie(el, msg.val, r));
+      el.classList.add('used');
+    }
+  } else if (msg.animType === 'scramble') {
+    await doScrambleAnimationGuest(msg.scrambledVals, msg.names);
+  }
+}
+
+// ── LOCAL ACTION (host clicking for themselves or relaying) ────
+function localAction(type, playerIdx) {
+  if (!isHost && myPlayerIdx !== playerIdx) return; // not your button
+  if (isHost && myPlayerIdx !== playerIdx) return;
+  sendAction(type, { playerIdx });
+}
+
+function handleLocalHostAction(type, data) {
+  if (type === 'golden') hostUseGolden(0);
+  else if (type === 'masterRollReroll') hostDoMasterRollReroll(0);
+  else if (type === 'goggles') hostUseGoggles(0);
+  else if (type === 'jinx') hostUseJinx(0);
+  else if (type === 'scramble') hostUseScramble(0);
+}
+
+function isMyTurn() {
+  return state.activePlayer === myPlayerIdx;
+}
+
+// ── GAME INIT ──────────────────────────────────────────────────
+async function startGame(n1, n2) {
+  document.getElementById('lobby-screen').style.display = 'none';
+  document.getElementById('game-screen').style.display = 'block';
+  markMeCol();
+
+  if (isHost) {
+    initGameState(n1, n2);
+    renderGameFromState();
+    // Tell guest to show game screen
+    broadcast('start', { n1, n2 });
+    // Small delay so guest is ready before state broadcasts begin
+    await sleep(600);
+    beginStartRoll();
+  }
+  // Guest switches screen on 'start' message
+}
+
+function markMeCol() {
+  document.getElementById('col-0').classList.toggle('me-col', myPlayerIdx === 0);
+  document.getElementById('col-1').classList.toggle('me-col', myPlayerIdx === 1);
+  // Add "you" tag
+  const nameEl = document.getElementById(`name-${myPlayerIdx}`);
+  if (nameEl && !nameEl.querySelector('.me-tag')) {
+    const tag = document.createElement('span');
+    tag.className = 'me-tag';
+    tag.textContent = 'you';
+    nameEl.appendChild(tag);
+  }
+}
+
+function initGameState(n1, n2) {
+  state = {
+    names: [n1, n2],
+    totals: [0, 0],
+    rounds: [[], []],
+    round: 1,
+    phase: 'startRoll',
+    startRollResults: [null, null],
+    startRollPlayer: 0,
+    activePlayer: 0,
+    firstPlayer: 0,
+    masterVal: 0,
+    allowed: 0,
+    blueDice: [],
+    blueRolled: 0,
+    turnPhase: '',
+    peeking: false,
+    pw: [
+      { golden: true, goggles: true, jinx: true, scramble: true },
+      { golden: true, goggles: true, jinx: true, scramble: true }
+    ],
+    scrambleAnimating: null,
+    _timerFrac: null,
+    _timerLabel: null,
+    _arenaMode: 'none',
+    _peekReveal: null,
+  };
+}
+
+function renderGameFromState() {
+  document.getElementById('name-0').textContent = state.names[0];
+  document.getElementById('name-1').textContent = state.names[1];
+  document.getElementById('total-0').textContent = '0';
+  document.getElementById('total-1').textContent = '0';
+  document.getElementById('history-0').innerHTML = '';
+  document.getElementById('history-1').innerHTML = '';
+  document.getElementById('play-again-btn').style.display = 'none';
+  document.getElementById('col-0').classList.remove('active-turn');
+  document.getElementById('col-1').classList.remove('active-turn');
+  document.getElementById('round-banner').textContent = '';
+  markMeCol();
+}
+
+// ── START ROLL (dice-off) ──────────────────────────────────────
+function beginStartRoll() {
+  state.startRollPlayer = 0;
+  state.startRollResults = [null, null];
+  state._arenaMode = 'start';
+  document.getElementById('arena-label').textContent = `${state.names[0]}, click the green dice!`;
+  renderStartDie();
+  broadcastState();
+}
+
+function renderStartDie() {
+  const a = document.getElementById('arena-dice');
+  const d = makeUnrolledDie('die-green');
+  d.id = 'master-die-el';
+  a.innerHTML = '';
+  a.appendChild(d);
+  document.getElementById('status-msg').textContent = '';
+
+  const cur = state.startRollPlayer;
+  if (cur === myPlayerIdx) {
+    // It's my turn to click
+    d.onclick = () => {
+      d.onclick = null;
+      if (isHost) resolveStartRoll(cur);
+      else sendAction('startRoll');
+    };
+  } else {
+    d.classList.add('no-click');
+  }
+}
+
+// Host resolves a start roll for player `p`
+async function resolveStartRoll(p) {
+  const val = rollDie();
+  state.startRollResults[p] = val;
+  sndStart();
+
+  // Animate locally
+  const el = document.getElementById('master-die-el');
+  if (el) await new Promise(r => animateDie(el, val, r));
+
+  // Tell guest to animate too
+  broadcast('animate', { animType: 'startRoll', val });
+
+  document.getElementById('status-msg').textContent = `${state.names[p]} rolled a ${val}`;
+  broadcastState();
+  await sleep(700);
+
+  if (p === 0) {
+    // Now player 1's turn
+    state.startRollPlayer = 1;
+    document.getElementById('arena-label').textContent = `${state.names[1]}, click the green dice!`;
+    renderStartDie();
+    broadcastState();
+  } else {
+    // Both rolled
+    const [r0, r1] = state.startRollResults;
+    if (r0 === r1) {
+      sndTie();
+      broadcastOverlay("It's a tie! Roll again!", 2500);
+      await showOverlay("It's a tie! Roll again!", 2500);
+      state.startRollPlayer = 0;
+      state.startRollResults = [null, null];
+      document.getElementById('arena-label').textContent = `${state.names[0]}, roll again!`;
+      renderStartDie();
+      broadcastState();
+    } else {
+      const w = r0 > r1 ? 0 : 1;
+      state.activePlayer = w;
+      state.firstPlayer = w;
+      state.phase = 'game';
+      sndRoundWin();
+      const overlayText = `${state.names[w]} wins the Glorious Dice-Off!<br><span style="font-size:20px;">Let the Dice-Scheiss begin!</span>`;
+      broadcastOverlay(overlayText, 3800);
+      await showOverlay(overlayText, 3800);
+      beginRound();
+    }
+  }
+}
+
+// ── ROUND FLOW ─────────────────────────────────────────────────
+async function beginRound() {
+  state.activePlayer = state.firstPlayer;
+  document.getElementById('round-banner').textContent = `Round ${state.round}`;
+  await sleep(300);
+  startPlayerTurn();
+}
+
+function startPlayerTurn() {
+  state.masterVal = 0;
+  state.blueRolled = 0;
+  state.blueDice = [];
+  state.peeking = false;
+  state.turnPhase = 'waitMaster';
+  state._arenaMode = 'master';
+  state._goldenUsed = false;
+  const ap = state.activePlayer;
+  document.getElementById('col-0').classList.toggle('active-turn', ap === 0);
+  document.getElementById('col-1').classList.toggle('active-turn', ap === 1);
+  document.getElementById('arena-label').textContent = `${state.names[ap]}, click the red master dice!`;
+  renderMasterDie();
+  refreshPowers();
+  broadcastState();
+}
+
+function renderMasterDie() {
+  const a = document.getElementById('arena-dice');
+  const d = makeUnrolledDie('die-red');
+  d.id = 'master-die-el';
+  a.innerHTML = '';
+  a.appendChild(d);
+  document.getElementById('status-msg').textContent = '';
+  // Increment seq so guest knows to rebuild the master die
+  state._masterSeq = (state._masterSeq || 0) + 1;
+
+  if (state.activePlayer === myPlayerIdx) {
+    d.onclick = () => {
+      d.onclick = null;
+      if (isHost) hostDoMasterRoll();
+      else sendAction('masterRoll');
+    };
+  } else {
+    d.classList.add('no-click');
+  }
+}
+
+// Host executes master roll
+async function hostDoMasterRoll() {
+  state.turnPhase = 'drumroll';
+  state._arenaMode = 'master';
+  broadcastState();
+
+  const el = document.getElementById('master-die-el');
+  el.classList.add('drumrolling');
+  el.classList.remove('unrolled');
+  el.innerHTML = '?';
+  document.getElementById('status-msg').innerHTML = '<span class="drumroll-label">🥁 Drumroll...</span>';
+  sndDrumroll();
+
+  broadcast('animate', { animType: 'masterRoll', val: 0 }); // start drumroll on guest
+  await sleep(1850);
+  el.classList.remove('drumrolling');
+
+  const val = rollDie();
+  state.masterVal = val;
+  state.allowed = val;
+
+  // Tell guest the actual value for animation
+  broadcast('animate', { animType: 'masterRollReveal', val });
+  await new Promise(r => animateDie(el, val, r));
+  sndCoin();
+
+  document.getElementById('status-msg').textContent = `Rolled a ${val} — pick ${val} blue dice to roll!`;
+  broadcastState();
+  await rerollTimerPhase();
+}
+async function resolveGuestMasterRoll() {
+  state.turnPhase = 'drumroll';
+  state._arenaMode = 'master';
+
+  const el = document.getElementById('master-die-el');
+  if (el) {
+    el.classList.add('drumrolling');
+    el.classList.remove('unrolled');
+    el.innerHTML = '?';
+  }
+  document.getElementById('status-msg').innerHTML = '<span class="drumroll-label">🥁 Drumroll...</span>';
+  sndDrumroll();
+
+  // Broadcast drumroll start to guest
+  broadcast('animate', { animType: 'masterRoll', val: 0 });
+  broadcastState();
+  await sleep(1850);
+
+  if (el) el.classList.remove('drumrolling');
+
+  const val = rollDie();
+  state.masterVal = val;
+  state.allowed = val;
+
+  broadcast('animate', { animType: 'masterRollReveal', val });
+  if (el) await new Promise(r => animateDie(el, val, r));
+  sndCoin();
+
+  document.getElementById('status-msg').textContent = `Rolled a ${val} — pick ${val} blue dice to roll!`;
+  broadcastState();
+  await rerollTimerPhase();
+}
+
+// ── BLUE DICE ──────────────────────────────────────────────────
+function renderBlueDice() {
+  const ap = state.activePlayer;
+  state._arenaMode = 'blue';
+  document.getElementById('arena-label').textContent = `${state.names[ap]}, pick your blue dice!`;
+  const a = document.getElementById('arena-dice');
+  const row = document.createElement('div');
+  row.className = 'blue-dice-row';
+  for (let i = 0; i < 6; i++) {
+    const d = makeUnrolledDie('die-blue', false);
+    d.style.cssText = 'width:64px;height:64px;font-size:26px;border-radius:12px;';
+    d.id = `bdie-${i}`;
+    d.classList.add('selectable');
+    state.blueDice[i] = { val: 0, rolled: false };
+    if (ap === myPlayerIdx) {
+      d.onclick = () => {
+        if (isHost) hostDoBlueRoll(i);
+        else sendAction('blueRoll', { idx: i });
+      };
+    } else {
+      d.classList.add('no-click');
+    }
+    row.appendChild(d);
+  }
+  a.innerHTML = '';
+  a.appendChild(row);
+  refreshPowers();
+  broadcastState();
+
+  // Re-enable goggles glow for active player
+  if (state.pw[ap].goggles) setGlow([`pw-goggles-${ap}`], true);
+}
+
+async function hostDoBlueRoll(idx, knownVal = null) {
+  if (state.blueDice[idx].rolled || state.blueRolled >= state.allowed) return;
+  if (state.turnPhase !== 'rollBlue') return;
+
+  const el = document.getElementById(`bdie-${idx}`);
+  if (!el) return;
+  el.onclick = null;
+  el.classList.remove('selectable', 'peeked');
+
+  const val = knownVal !== null ? knownVal : rollDie();
+  state.blueDice[idx] = { val, rolled: true };
+  state.blueRolled++;
+
+  broadcast('animate', { animType: 'blueRoll', idx, val });
+  await new Promise(r => animateDie(el, val, r));
+  el.classList.add('used');
+
+  document.getElementById('status-msg').textContent = `${state.blueRolled} of ${state.allowed} rolled`;
+  broadcastState();
+  refreshPowers();
+
+  // Keep goggles glowing
+  if (state.pw[state.activePlayer].goggles && !state.peeking) {
+    setGlow([`pw-goggles-${state.activePlayer}`], true);
+  }
+
+  if (state.blueRolled >= state.allowed) {
+    await sleep(300);
+    await scrambleTimerPhase();
+    finishTurn();
+  }
+}
+
+async function resolveGuestBlueRoll(idx) {
+  if (state.blueDice[idx] && state.blueDice[idx].rolled) return;
+  if (state.blueRolled >= state.allowed) return;
+  if (state.turnPhase !== 'rollBlue') return;
+
+  const el = document.getElementById(`bdie-${idx}`);
+  if (!el) return;
+  el.onclick = null;
+  el.classList.remove('selectable', 'peeked', 'no-click');
+
+  const knownVal = state.blueDice[idx]?.peekVal;
+  const val = knownVal !== undefined ? knownVal : rollDie();
+  state.blueDice[idx] = { val, rolled: true };
+  state.blueRolled++;
+
+  broadcast('animate', { animType: 'blueRoll', idx, val });
+  await new Promise(r => animateDie(el, val, r));
+  el.classList.add('used');
+
+  document.getElementById('status-msg').textContent = `${state.blueRolled} of ${state.allowed} rolled`;
+  broadcastState();
+  refreshPowers();
+
+  if (state.pw[state.activePlayer].goggles && !state.peeking) {
+    setGlow([`pw-goggles-${state.activePlayer}`], true);
+  }
+
+  if (state.blueRolled >= state.allowed) {
+    await sleep(300);
+    await scrambleTimerPhase();
+    finishTurn();
+  }
+}
+
+// ── POWER-UPS (host executes all) ──────────────────────────────────────────────
+async function hostUseGoggles(p) {
+  if (state.activePlayer !== p || state.turnPhase !== 'rollBlue' || !state.pw[p].goggles || state.peeking) return;
+  state.pw[p].goggles = false;
+  state.peeking = true;
+  sndPeek();
+  setGlow([`pw-goggles-${p}`], false);
+  document.getElementById('status-msg').textContent = 'Future Goggles! Click one unrolled dice to secretly peek...';
+  refreshPowers();
+  broadcastState();
+
+  if (p === myPlayerIdx) {
+    // Enable peek clicks for host
+    for (let i = 0; i < 6; i++) {
+      const d = document.getElementById(`bdie-${i}`);
+      if (d && !state.blueDice[i].rolled) {
+        d.onclick = () => hostDoGogglesPick(p, i);
+      }
+    }
+  }
+  // If p===1 (guest), wait for gogglesPick action
+}
+
+async function hostDoGogglesPick(p, idx) {
+  if (!state.peeking) return;
+  state.peeking = false;
+  const val = rollDie();
+  state.blueDice[idx] = { ...state.blueDice[idx], peekVal: val, rolled: false };
+  state._peekReveal = { idx, val, forPlayer: p };
+
+  const el = document.getElementById(`bdie-${idx}`);
+  if (el) {
+    el.classList.remove('unrolled');
+    el.classList.add('peeked');
+    el.innerHTML = faceHTML(val);
+    if (p === myPlayerIdx) {
+      el.onclick = () => hostDoBlueRoll(idx, val);
+    }
+  }
+
+  document.getElementById('status-msg').textContent = `👀 Psst — that one's a ${val}. Your secret!`;
+  refreshPowers();
+
+  // Only reveal peek to the peeker
+  // Broadcast with peek info — guest will only render it if it's their peek
+  broadcastState();
+  state._peekReveal = null; // clear after broadcast
+
+  // Re-enable other dice for active player
+  if (p === myPlayerIdx) {
+    for (let i = 0; i < 6; i++) {
+      const d = document.getElementById(`bdie-${i}`);
+      if (d && !state.blueDice[i].rolled && i !== idx) {
+        d.onclick = () => hostDoBlueRoll(i);
+      }
+    }
+  }
+}
+
+async function hostUseJinx(p) {
+  const opp = 1 - p;
+  if (state.activePlayer !== opp || state.turnPhase !== 'jinxTimer' || !state.pw[p].jinx) return;
+  state.pw[p].jinx = false;
+  state.turnPhase = 'jinxing';
+  state._arenaMode = 'master';
+  state._suppressArena = true; // freeze guest arena during overlay
+  hideTimer();
+  setGlow([`pw-jinx-${p}`], false);
+  sndJinx();
+  broadcastState();
+  const overlayText = `🧿 JINX! ${state.names[p]} forces ${state.names[opp]} to reroll!`;
+  broadcastOverlay(overlayText, 3000, 'jinx-skin');
+  await showOverlay(overlayText, 3000, 'jinx-skin');
+  state._suppressArena = false;
+  state.turnPhase = 'waitMaster';
+  state._arenaMode = 'master';
+  document.getElementById('arena-label').textContent = `${state.names[opp]}, click the red dice — it's been jinxed! 🧿`;
+  document.getElementById('status-msg').textContent = `${state.names[opp]}, click the red dice — it's been jinxed! 🧿`;
+  renderMasterDie();
+  refreshPowers();
+  broadcastState();
+}
+
+async function hostUseScramble(p) {
+  const opp = 1 - p;
+  if (state.activePlayer !== opp || state.turnPhase !== 'scrambleTimer' || !state.pw[p].scramble) return;
+  state.pw[p].scramble = false;
+  state.turnPhase = 'done';
+  hideTimer();
+  setGlow([`pw-scramble-${p}`], false);
+  state.scrambleAnimating = hostDoScramble(p, opp);
+}
+
+async function hostDoScramble(p, opp) {
+  const scoreBefore = state.blueDice.filter(d => d.rolled).reduce((s, d) => s + d.val, 0);
+  const overlayText = `SCRAMBLE! ${state.names[p]} scrambles ${state.names[opp]}'s dice!`;
+  broadcastOverlay(overlayText, 2600, 'scramble-skin');
+  await showOverlay(overlayText, 2600, 'scramble-skin');
+
+  // Pick new values for all rolled dice
+  const scrambledVals = {};
+  for (let i = 0; i < 6; i++) {
+    if (state.blueDice[i] && state.blueDice[i].rolled) {
+      scrambledVals[i] = rollDie();
+    }
+  }
+
+  // Tell both to animate
+  broadcast('animate', { animType: 'scramble', scrambledVals, names: state.names });
+  await doScrambleAnimationLocal(scrambledVals);
+
+  // Apply new values
+  for (const [i, nv] of Object.entries(scrambledVals)) {
+    state.blueDice[i].val = nv;
+  }
+
+  const scoreAfter = state.blueDice.filter(d => d.rolled).reduce((s, d) => s + d.val, 0);
+  const diff = scoreAfter - scoreBefore;
+  let resultMsg, taunt;
+  if (diff === 0) {
+    resultMsg = `${scoreBefore} → ${scoreAfter}. No change.`;
+    taunt = `Lucky break, ${state.names[opp]}.`;
+  } else if (diff > 0) {
+    resultMsg = `${scoreBefore} → ${scoreAfter}. Up by ${diff}.`;
+    taunt = `The scramble backfired, ${state.names[p]}. That hurt you more than ${state.names[opp]}.`;
+  } else {
+    resultMsg = `${scoreBefore} → ${scoreAfter}. Down by ${Math.abs(diff)}.`;
+    taunt = `${state.names[opp]} watches ${Math.abs(diff)} points vanish into thin air.`;
+  }
+  const scrambleResult = `<span style="font-size:22px;">Scramble result</span><br><span style="font-size:28px;font-weight:500;">${resultMsg}</span><br><span style="font-size:15px;opacity:0.85;font-style:italic;">${taunt}</span>`;
+  broadcastOverlay(scrambleResult, 4700, 'scramble-skin');
+  await showOverlay(scrambleResult, 4700, 'scramble-skin');
+  broadcastState();
+}
+
+async function doScrambleAnimationLocal(scrambledVals) {
+  document.getElementById('status-msg').textContent = 'Scrambling...';
+  for (const [i, nv] of Object.entries(scrambledVals)) {
+    const el = document.getElementById(`bdie-${i}`);
+    if (!el) continue;
+    el.classList.remove('used');
+    el.style.opacity = '1';
+    sndScramble();
+    await new Promise(res => {
+      let n = 0;
+      const iv = setInterval(() => {
+        el.innerHTML = faceHTML(rollDie());
+        n++;
+        if (n >= 15) { clearInterval(iv); el.innerHTML = faceHTML(nv); res(); }
+      }, 80);
+    });
+    await sleep(350);
+  }
+}
+
+async function doScrambleAnimationGuest(scrambledVals, names) {
+  document.getElementById('status-msg').textContent = 'Scrambling...';
+  for (const [i, nv] of Object.entries(scrambledVals)) {
+    const el = document.getElementById(`bdie-${i}`);
+    if (!el) continue;
+    el.classList.remove('used');
+    el.style.opacity = '1';
+    sndScramble();
+    await new Promise(res => {
+      let n = 0;
+      const iv = setInterval(() => {
+        el.innerHTML = faceHTML(rollDie());
+        n++;
+        if (n >= 15) { clearInterval(iv); el.innerHTML = faceHTML(nv); res(); }
+      }, 80);
+    });
+    await sleep(350);
+  }
+}
+
+// ── TURN PHASES ────────────────────────────────────────────────
+async function rerollTimerPhase() {
+  const ap = state.activePlayer;
+  if (!state.pw[ap].golden) {
+    // No golden left — skip straight to jinx window
+    await jinxTimerPhase();
+    return;
+  }
+  state.turnPhase = 'rerollTimer';
+  state._timerLabel = '🎲 Reroll window';
+  document.getElementById('arena-label').textContent = `${state.names[ap]}, use the Golden Reroll?`;
+  refreshPowers();
+  broadcastState();
+  await runTimerFor('rerollTimer', [`pw-golden-${ap}`]);
+  // If golden was used, turnPhase changed to 'rerolling' — don't call jinxTimerPhase here.
+  // hostUseGolden / the new master roll will call jinxTimerPhase when ready.
+  if (state.turnPhase !== 'rerolling' && state.turnPhase !== 'drumroll' && state.turnPhase !== 'waitMaster') {
+    await jinxTimerPhase();
+  }
+}
+
+async function hostUseGolden(p) {
+  if (state.activePlayer !== p || state.turnPhase !== 'rerollTimer' || !state.pw[p].golden) return;
+  state.pw[p].golden = false;
+  state.turnPhase = 'rerolling';
+  state._goldenUsed = true;
+  hideTimer();
+  setGlow([`pw-golden-${p}`], false);
+  sndGolden();
+  state._arenaMode = 'master';
+  state._suppressArena = true;
+  refreshPowers();
+  broadcastState();
+
+  const overlayText = `🎲 GOLDEN REROLL! ${state.names[p]} ditches the ${state.masterVal} and rolls again!`;
+  broadcastOverlay(overlayText, 2800, '');
+  await showOverlay(overlayText, 2800, '');
+  state._suppressArena = false;
+
+  // Reset master die — active player must click it again
+  state.masterVal = 0;
+  state.allowed = 0;
+  state.turnPhase = 'waitMaster';
+  state._masterSeq = (state._masterSeq || 0) + 1;
+  document.getElementById('arena-label').textContent = `${state.names[p]}, click the red dice to reroll!`;
+  document.getElementById('status-msg').textContent = '';
+  refreshPowers();
+
+  // Rebuild the master die element and wire up the click
+  const a = document.getElementById('arena-dice');
+  const d = makeUnrolledDie('die-red');
+  d.id = 'master-die-el';
+  a.innerHTML = '';
+  a.appendChild(d);
+
+  if (p === myPlayerIdx) {
+    // This player is local — give them the click
+    d.onclick = () => {
+      d.onclick = null;
+      if (isHost) hostDoMasterRollReroll(p);
+      else sendAction('masterRollReroll');
+    };
+  } else {
+    d.classList.add('no-click');
+  }
+  broadcastState();
+}
+
+async function hostDoMasterRollReroll(p) {
+  // Same as hostDoMasterRoll but calls jinxTimerPhase directly (no reroll window again)
+  state.turnPhase = 'drumroll';
+  state._arenaMode = 'master';
+  broadcastState();
+
+  const el = document.getElementById('master-die-el');
+  if (el) {
+    el.classList.add('drumrolling');
+    el.classList.remove('unrolled');
+    el.innerHTML = '?';
+  }
+  document.getElementById('status-msg').innerHTML = '<span class="drumroll-label">🥁 Drumroll...</span>';
+  sndDrumroll();
+
+  broadcast('animate', { animType: 'masterRoll', val: 0 });
+  await sleep(1850);
+  if (el) el.classList.remove('drumrolling');
+
+  const val = rollDie();
+  state.masterVal = val;
+  state.allowed = val;
+
+  broadcast('animate', { animType: 'masterRollReveal', val });
+  if (el) await new Promise(r => animateDie(el, val, r));
+  sndCoin();
+
+  document.getElementById('status-msg').textContent = `Rerolled a ${val} — pick ${val} blue dice to roll!`;
+  broadcastState();
+  await jinxTimerPhase();
+}
+
+async function resolveGuestMasterRollReroll() {
+  // Guest used golden reroll — host resolves the reroll click
+  state.turnPhase = 'drumroll';
+  state._arenaMode = 'master';
+
+  const el = document.getElementById('master-die-el');
+  if (el) {
+    el.classList.add('drumrolling');
+    el.classList.remove('unrolled');
+    el.innerHTML = '?';
+  }
+  document.getElementById('status-msg').innerHTML = '<span class="drumroll-label">🥁 Drumroll...</span>';
+  sndDrumroll();
+
+  broadcast('animate', { animType: 'masterRoll', val: 0 });
+  broadcastState();
+  await sleep(1850);
+  if (el) el.classList.remove('drumrolling');
+
+  const val = rollDie();
+  state.masterVal = val;
+  state.allowed = val;
+
+  broadcast('animate', { animType: 'masterRollReveal', val });
+  if (el) await new Promise(r => animateDie(el, val, r));
+  sndCoin();
+
+  document.getElementById('status-msg').textContent = `Rerolled a ${val} — pick ${val} blue dice to roll!`;
+  broadcastState();
+  await jinxTimerPhase();
+}
+
+async function jinxTimerPhase() {
+  const opp = 1 - state.activePlayer;
+  const ap = state.activePlayer;
+  if (!state.pw[opp].jinx) {
+    if (state.turnPhase !== 'waitMaster') {
+      state.turnPhase = 'rollBlue';
+      refreshPowers();
+      await sleep(600);
+      renderBlueDice();
+    }
+    return;
+  }
+  state.turnPhase = 'jinxTimer';
+  state._timerLabel = '⚡ Power window';
+  document.getElementById('arena-label').textContent = `${state.names[opp]}, use the Jinx?`;
+  refreshPowers();
+  broadcastState();
+  await runTimerFor('jinxTimer', [`pw-jinx-${opp}`]);
+  if (state.turnPhase === 'waitMaster') return;
+  state.turnPhase = 'rollBlue';
+  refreshPowers();
+  await sleep(600);
+  renderBlueDice();
+}
+
+async function scrambleTimerPhase() {
+  const opp = 1 - state.activePlayer;
+  if (!state.pw[opp].scramble) return;
+  state.turnPhase = 'scrambleTimer';
+  state._timerLabel = '⚡ Power window';
+  document.getElementById('arena-label').textContent = `${state.names[opp]}, use the Scramble?`;
+  refreshPowers();
+  broadcastState();
+  await runTimerFor('scrambleTimer', [`pw-scramble-${opp}`]);
+  if (state.scrambleAnimating) { await state.scrambleAnimating; state.scrambleAnimating = null; }
+  state.turnPhase = 'done';
+}
+
+// ── FINISH TURN ────────────────────────────────────────────────
+async function finishTurn() {
+  state.turnPhase = 'done';
+  state._arenaMode = 'none';
+  refreshPowers();
+  const ap = state.activePlayer;
+  const sc = state.blueDice.filter(d => d.rolled).reduce((s, d) => s + d.val, 0);
+  const ri = state.round - 1;
+  const prev = state.totals[ap];
+  state.totals[ap] += sc;
+  if (!state.rounds[ap][ri]) {
+    state.rounds[ap][ri] = {
+      master: state.masterVal,
+      dice: state.blueDice.filter(d => d.rolled).map(d => d.val),
+      score: sc
+    };
+  }
+  document.getElementById('arena-dice').innerHTML = '';
+  document.getElementById('status-msg').textContent = '';
+  updateRoundHistory(ap);
+  broadcastState();
+
+  // Animate score
+  broadcast('scoreAnim', { id: `total-${ap}`, from: prev, to: state.totals[ap] });
+  await animateScoreCount(`total-${ap}`, prev, state.totals[ap]);
+
+  if (!state.rounds[0][ri] || !state.rounds[1][ri]) {
+    state.activePlayer = 1 - ap;
+    await sleep(800);
+    startPlayerTurn();
+  } else {
+    await announceRoundWinner(state.round);
+    if (state.round >= TOTAL_ROUNDS) { await sleep(600); endGame(); return; }
+    state.round++;
+    fadeOldRounds();
+    await sleep(600);
+    beginRound();
+  }
+}
+
+function updateRoundHistory(p) {
+  const h = document.getElementById(`history-${p}`);
+  h.innerHTML = '';
+  state.rounds[p].forEach((rd, r) => {
+    if (!rd) return;
+    const row = document.createElement('div');
+    row.className = 'round-row';
+    row.id = `rrow-${p}-${r}`;
+    let html = `<span class="rd-label">Round ${r + 1}:</span><span class="die die-red small" style="display:inline-flex;">${faceHTML(rd.master)}</span>`;
+    rd.dice.forEach(v => { html += `<span class="die die-blue small" style="display:inline-flex;">${faceHTML(v)}</span>`; });
+    html += `<span style="margin-left:4px;font-weight:500;">= ${rd.score}</span>`;
+    row.innerHTML = html;
+    h.appendChild(row);
+  });
+}
+
+function fadeOldRounds() {
+  for (let p = 0; p < 2; p++) {
+    for (let r = 0; r < state.round - 1; r++) {
+      const el = document.getElementById(`rrow-${p}-${r}`);
+      if (el) el.classList.add('faded');
+    }
+  }
+}
+
+async function announceRoundWinner(rn) {
+  const s0 = state.rounds[0][rn - 1]?.score || 0;
+  const s1 = state.rounds[1][rn - 1]?.score || 0;
+  let text;
+  if (s0 === s1) { sndDraw(); text = `Round ${rn} is a draw! Both scored ${s0} 🤔`; }
+  else { const w = s0 > s1 ? 0 : 1; sndRoundWin(); text = (ROUND_TAUNTS[rn - 1] || (n => `${n} wins Round ${rn}!`))(state.names[w]); }
+  broadcastOverlay(text, 3000);
+  await showOverlay(text, 3000);
+}
+
+async function endGame() {
+  const [s0, s1] = state.totals;
+  document.getElementById('col-0').classList.remove('active-turn');
+  document.getElementById('col-1').classList.remove('active-turn');
+  state.turnPhase = 'done';
+  refreshPowers();
+  broadcastState();
+  let winner = null, msg;
+  if (s0 === s1) {
+    sndDraw();
+    msg = `It's a DRAW! ${s0} — ${s1}<br><span style="font-size:18px;">The Dice-Scheiss ends in total chaos!</span>`;
+  } else {
+    const w = s0 > s1 ? 0 : 1;
+    const l = 1 - w;
+    winner = state.names[w];
+    const loser = state.names[l];
+    const diff = Math.abs(s0 - s1);
+    sndFinalWin();
+    const insult = rnd(INSULTS)(winner, loser, diff);
+    msg = `${winner} is the ultimate and supreme winner!<br><span style="font-size:16px;opacity:0.88;">${state.totals[w]} vs ${state.totals[l]}</span><br><span style="font-size:13px;margin-top:8px;display:block;opacity:0.75;font-style:italic;">${insult}</span>`;
+  }
+  broadcastOverlay(msg, 6500, 'fire');
+  await showOverlay(msg, 6500, 'fire');
+  document.getElementById('play-again-btn').style.display = 'block';
+  leaderboard.push({
+    winner: winner || 'Draw',
+    score: Math.max(s0, s1),
+    p0: state.names[0], s0,
+    p1: state.names[1], s1,
+    date: new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+  });
+  leaderboard.sort((a, b) => b.score - a.score);
+  persistLeaderboard();
+}
+
+function playAgain() {
+  // Reset to lobby
+  document.getElementById('game-screen').style.display = 'none';
+  document.getElementById('lobby-screen').style.display = 'block';
+  document.getElementById('lobby-screen').querySelector('.lobby-wrap').style.display = 'block';
+  document.getElementById('waiting-screen').style.display = 'none';
+  document.getElementById('disconnect-banner').style.display = 'none';
+  hideTimer();
+  document.getElementById('arena-dice').innerHTML = '';
+  document.getElementById('arena-label').textContent = 'Waiting…';
+  document.getElementById('status-msg').textContent = '';
+  document.getElementById('round-banner').textContent = '';
+  if (roomChannel) { roomChannel.presence.leave(); roomChannel.unsubscribe(); roomChannel = null; }
+  myPlayerIdx = null; isHost = false; myRoomCode = null; state = {};
+}
+
+// ── POWER BUTTON DISPLAY ───────────────────────────────────────
+function refreshPowers() {
+  if (!state.pw) return;
+  for (let p = 0; p < 2; p++) {
+    const pw = state.pw[p];
+    const myTurn = state.activePlayer === p;
+    const theirTurn = !myTurn;
+    const phase = state.turnPhase;
+    const canGolden = myTurn && phase === 'rerollTimer' && pw.golden && p === myPlayerIdx;
+    const canGoggles = myTurn && phase === 'rollBlue' && pw.goggles && !state.peeking && p === myPlayerIdx;
+    const canJinx = theirTurn && phase === 'jinxTimer' && pw.jinx && p === myPlayerIdx;
+    const canScramble = theirTurn && phase === 'scrambleTimer' && pw.scramble && p === myPlayerIdx;
+    setBtn(`pw-golden-${p}`, pw.golden, canGolden);
+    setBtn(`pw-goggles-${p}`, pw.goggles, canGoggles);
+    setBtn(`pw-jinx-${p}`, pw.jinx, canJinx);
+    setBtn(`pw-scramble-${p}`, pw.scramble, canScramble);
+  }
+}
+
+function setBtn(id, hasIt, canUse) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('used-power', 'glowing');
+  if (!hasIt) el.classList.add('used-power');
+}
+
+// ── TIMER ──────────────────────────────────────────────────────
+function showTimer(label) {
+  const slot = document.getElementById('timer-slot');
+  if (!slot) return;
+  slot.innerHTML = `<div class="timer-box"><div class="timer-label">${label}</div><div style="display:flex;align-items:center;gap:8px;"><div class="timer-track"><div class="timer-fill" id="t-fill"></div></div><div class="timer-num" id="t-num">5</div></div></div>`;
+}
+
+function showTimerGuest(label, frac) {
+  if (!document.getElementById('t-fill')) showTimer(label || '⚡ Power window');
+  updateTimer(frac);
+}
+
+function hideTimer() {
+  state._timerFrac = null;
+  state._timerLabel = null;
+  const slot = document.getElementById('timer-slot');
+  if (slot) slot.innerHTML = '';
+}
+
+function updateTimer(frac) {
+  const fill = document.getElementById('t-fill');
+  const num = document.getElementById('t-num');
+  if (fill) { fill.style.width = (frac * 100) + '%'; fill.style.background = frac > 0.5 ? '#185FA5' : frac > 0.25 ? '#E24B4A' : '#cc4400'; }
+  if (num) { num.textContent = Math.ceil(frac * 5) || 0; num.style.color = frac > 0.5 ? '#185FA5' : frac > 0.25 ? '#E24B4A' : '#cc4400'; }
+}
+
+function setGlow(ids, on) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (on && !el.classList.contains('used-power')) el.classList.add('glowing');
+      else el.classList.remove('glowing');
+    }
+  });
+}
+
+function runTimerFor(phase, glowIds) {
+  return new Promise(resolve => {
+    showTimer(state._timerLabel || '⚡ Power window');
+    updateTimer(1);
+    setGlow(glowIds, true);
+    let elapsed = 0;
+    const iv = setInterval(() => {
+      elapsed += 80;
+      const frac = Math.max(0, 1 - elapsed / 5000);
+      updateTimer(frac);
+      state._timerFrac = frac;
+      broadcastState(); // broadcast timer tick to guest
+      if (state.turnPhase !== phase || elapsed >= 5000) {
+        clearInterval(iv);
+        setGlow(glowIds, false);
+        hideTimer();
+        state._timerFrac = null;
+        broadcastState();
+        resolve();
+      }
+    }, 80);
+  });
+}
+
+// ── OVERLAY HELPERS ────────────────────────────────────────────
+function broadcastOverlay(text, duration, skin = '') {
+  broadcast('overlay', { text, duration, skin });
+}
+
+function showOverlay(text, duration = 2200, skin = '') {
+  return new Promise(res => {
+    const ov = document.getElementById('overlay');
+    const ot = document.getElementById('overlay-text');
+    ot.innerHTML = text;
+    ot.className = 'overlay-text' + (skin ? ' ' + skin : '');
+    ov.style.display = 'flex';
+    setTimeout(() => { ov.style.display = 'none'; res(); }, duration);
+  });
+}
+
+// ── DISCONNECT ─────────────────────────────────────────────────
+function showDisconnectBanner() {
+  const b = document.getElementById('disconnect-banner');
+  if (b) b.style.display = 'block';
+}
+
+// ── AUDIO ──────────────────────────────────────────────────────
+function getCtx() {
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { } }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+function playTone(f, t, dur, vol = 0.3, delay = 0) { const c = getCtx(); if (!c) return; const o = c.createOscillator(); const g = c.createGain(); o.connect(g); g.connect(c.destination); o.type = t; o.frequency.value = f; const s = c.currentTime + delay; g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(vol, s + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, s + dur); o.start(s); o.stop(s + dur + 0.05); }
+function playNoise(dur, vol = 0.15, delay = 0) { const c = getCtx(); if (!c) return; const buf = c.createBuffer(1, c.sampleRate * dur, c.sampleRate); const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1); const src = c.createBufferSource(); const g = c.createGain(); const fl = c.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = 800; fl.Q.value = 0.5; src.buffer = buf; src.connect(fl); fl.connect(g); g.connect(c.destination); const s = c.currentTime + delay; g.gain.setValueAtTime(vol, s); g.gain.exponentialRampToValueAtTime(0.0001, s + dur); src.start(s); src.stop(s + dur + 0.05); }
+function sndRoll() { for (let i = 0; i < 6; i++) { playNoise(0.06, 0.2, i * 0.055); playTone(200 + Math.random() * 400, 'square', 0.04, 0.1, i * 0.055); } }
+function sndDrumroll() { for (let i = 0; i < 20; i++) { const delay = i * 0.088; playNoise(0.07, 0.14 + i * 0.007, delay); playTone(100 + i * 5, 'square', 0.055, 0.07, delay); } }
+function sndCoin() { playTone(1200, 'sine', 0.08, 0.2); playTone(1500, 'sine', 0.06, 0.15, 0.06); }
+function sndScore() { playTone(880, 'sine', 0.07, 0.18); }
+function sndRoundWin() { [523, 659, 784, 1047].forEach((f, i) => playTone(f, 'triangle', 0.25, 0.28, i * 0.12)); }
+function sndFinalWin() { const ff = [523, 523, 523, 415, 523, 0, 659, 0, 523, 415, 523], dd = [0.15, 0.15, 0.15, 0.12, 0.4, 0.1, 0.4, 0.1, 0.15, 0.12, 0.5]; let t = 0; ff.forEach((f, i) => { if (f > 0) playTone(f, 'triangle', dd[i], 0.35, t); t += dd[i] + 0.02; }); setTimeout(() => { [[261, 329, 392], [294, 370, 440], [349, 440, 523]].forEach((ch, ci) => ch.forEach(f => playTone(f, 'sine', 0.4, 0.2, ci * 0.5))); }, 1200); }
+function sndDraw() { playTone(392, 'sawtooth', 0.3, 0.2); playTone(370, 'sawtooth', 0.3, 0.2, 0.15); playTone(349, 'sawtooth', 0.4, 0.2, 0.3); }
+function sndStart() { playTone(440, 'sine', 0.1, 0.25); playTone(550, 'sine', 0.1, 0.25, 0.1); playTone(660, 'sine', 0.15, 0.25, 0.2); }
+function sndTie() { playTone(300, 'sawtooth', 0.15, 0.3); playTone(280, 'sawtooth', 0.15, 0.3, 0.18); }
+function sndJinx() { playTone(200, 'sawtooth', 0.08, 0.3); playTone(150, 'sawtooth', 0.12, 0.3, 0.1); playTone(100, 'sawtooth', 0.2, 0.3, 0.22); }
+function sndScramble() { for (let i = 0; i < 8; i++) { playNoise(0.08, 0.25, i * 0.07); playTone(300 + Math.random() * 500, 'sawtooth', 0.06, 0.15, i * 0.07); } }
+function sndPeek() { playTone(800, 'sine', 0.06, 0.2); playTone(1200, 'sine', 0.1, 0.2, 0.07); playTone(1600, 'sine', 0.08, 0.15, 0.14); }
+function sndGolden() { playTone(1047, 'sine', 0.12, 0.3); playTone(880, 'sine', 0.12, 0.25, 0.1); playTone(1047, 'sine', 0.2, 0.3, 0.22); }
+
+document.addEventListener('click', () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, false);
+document.addEventListener('touchstart', () => { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); }, false);
+
+// ── UTILITIES ──────────────────────────────────────────────────
+function rollDie() { return Math.floor(Math.random() * 6) + 1; }
+function faceHTML(v) { return FACES[v - 1]; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function makeUnrolledDie(cls, big = true) { const d = document.createElement('div'); d.className = `die ${cls}${big ? ' big' : ''} unrolled`; d.innerHTML = '?'; return d; }
+
+
+async function animateScoreCount(id, from, to) {
+  const el = document.getElementById(id); if (!el) return;
+  const diff = to - from; if (diff <= 0) { el.textContent = to; return; }
+  const steps = Math.min(diff, 20); const step = diff / steps;
+  for (let i = 1; i <= steps; i++) { await sleep(60); el.textContent = Math.round(from + step * i); el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); sndScore(); }
+  el.textContent = to;
+}
+
+function animateDie(el, finalVal, cb) {
+  el.classList.add('rolling'); el.classList.remove('unrolled', 'peeked'); sndRoll();
+  let n = 0; const iv = setInterval(() => { el.innerHTML = faceHTML(Math.floor(Math.random() * 6) + 1); n++; if (n >= 10) { clearInterval(iv); el.innerHTML = faceHTML(finalVal); el.classList.remove('rolling'); if (cb) cb(); } }, 45);
+}
+
+function switchTab(t, el) {
+  document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + t).classList.add('active');
+  if (t === 'leaderboard') renderLeaderboard();
+}
+
+// ── LEADERBOARD ────────────────────────────────────────────────
+function loadLeaderboard() { try { const d = localStorage.getItem(STORAGE_KEY); if (d) leaderboard = JSON.parse(d); } catch (e) { } }
+function persistLeaderboard() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(leaderboard)); } catch (e) { } }
+function clearLeaderboard() { if (!confirm('Clear all leaderboard entries?')) return; leaderboard = []; try { localStorage.removeItem(STORAGE_KEY); } catch (e) { } renderLeaderboard(); }
+function renderLeaderboard() {
+  const el = document.getElementById('lb-content');
+  if (!leaderboard.length) { el.innerHTML = '<p class="lb-empty">No games played yet. Win something first!</p>'; return; }
+  const medals = ['🥇', '🥈', '🥉'];
+  let html = `<table class="lb-table"><thead><tr><th>#</th><th>Winner</th><th>Score</th><th>Players</th><th>Date</th></tr></thead><tbody>`;
+  leaderboard.forEach((g, i) => { html += `<tr><td>${medals[i] || '#' + (i + 1)}</td><td style="font-weight:500;">${g.winner}</td><td>${g.score}</td><td style="color:#888;font-size:12px;">${g.p0} ${g.s0} — ${g.p1} ${g.s1}</td><td style="color:#888;font-size:12px;">${g.date}</td></tr>`; });
+  html += `</tbody></table>`; el.innerHTML = html;
+}
+
+// ── BOOT ───────────────────────────────────────────────────────
+loadLeaderboard();
+renderLeaderboard();
+initAbly();
+</script>
+</body>
+</html>
